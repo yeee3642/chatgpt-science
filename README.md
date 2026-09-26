@@ -4,6 +4,16 @@
 
 **目前公開的是未完成的原始碼快照，不是正式版 EXE，也尚未達到完整功能對齊。** 請先讀 [交接與未完成項目](docs/HANDOFF.md)。
 
+## 兩條路線
+
+這個 repository 現在有兩種做法，目標不同，不共用程式碼。
+
+**`bridge/` — 只改接口。** 直接執行原版 Claude Science，只把推論端點指向本機轉接服務，其餘一律不動：不修改可執行檔、不改編譯介面、不重寫後端服務。原版的 kernel、成果版本、連接器、技能與檢視器因為就是原版，所以本來就能用。作法與已查明的限制見 [接口重導](docs/INTERFACE-ONLY.md)。注意原版強制要求 Claude 登入，這條路線不移除該要求，只改推論去向。
+
+**其餘目錄 — 獨立應用。** 自建 Electron shell、Node 服務與 worker，配合本機提供的參考介面。這條路線要重做原版的整個後端；[HANDOFF](docs/HANDOFF.md) 列出尚未完成的部分，其中 `server/reference-artifacts.mjs` 仍未撰寫。
+
+兩者都尚未通過端到端驗收。
+
 ## 公開範圍
 
 Repository 包含自行開發的 Electron shell、Node 服務、ChatGPT bridge、Python／R worker、介面協定 adapters、測試及建置腳本。原版 Claude Science 的可執行檔、編譯介面、字型與其他資源不在此 repository；研究資料、登入憑證、瀏覽器設定、runtime、測試輸出和舊 EXE 也不會上傳。
