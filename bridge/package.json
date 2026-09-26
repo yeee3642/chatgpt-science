@@ -1,0 +1,14 @@
+{
+  "name": "chatgpt-science-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Loopback Anthropic-Messages gateway that redirects Claude Science inference to a ChatGPT account",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test *.test.mjs"
+  },
+  "dependencies": {
+    "pdf-parse": "2.4.5"
+  }
+}
