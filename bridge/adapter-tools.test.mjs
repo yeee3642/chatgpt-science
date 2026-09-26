@@ -348,15 +348,12 @@ test('a tool_result that was already consumed is rejected', async () => {
 /*
  * SUSPECTED DEFECT (left failing on purpose; adapter.mjs must not be changed to suit it).
  *
- * adapter.mjs:493-496 validates each supplied tool_result against context.tools, but the
- * `resolved` flag it checks is only set later, in the loop at adapter.mjs:518-521. Two
- * tool_result blocks with the same tool_use_id therefore both pass validation; the first
- * resolves the pending call and the second is dropped on the floor, because resolving an
- * already-settled promise is a no-op. The caller gets a normal answer and is never told that
- * one of the two results it supplied was discarded, even though the adapter's own error
- * message claims duplicates are refused.
+ * Was a real defect, now fixed. The per-record checks compare each result against a record
+ * that is still unresolved, because resolution happens later, so two entries for one id both
+ * passed: the first resolved the pending call and the second was silently dropped. A uniqueness
+ * check now runs before anything mutates state. This test fails if that check is removed.
  */
-test('rejects a duplicated tool_result for the same tool_use_id', { todo: true }, async () => {
+test('rejects a duplicated tool_result for the same tool_use_id', async () => {
   await withAdapter(async ({ adapter, gen }) => {
     const first = await adapter.messages(ask());
     const id = toolUseOf(first).id;
@@ -364,7 +361,7 @@ test('rejects a duplicated tool_result for the same tool_use_id', { todo: true }
       () => adapter.messages(followUp(ask(), first, [okResult(id, 'Sunny, 30C'), okResult(id, 'Actually, raining')])),
       error => {
         assert.equal(error.status, 400);
-        assert.match(error.message, /unknown, duplicated, or already consumed/);
+        assert.match(error.message, /only one tool_result/);
         return true;
       });
     assert.equal(gen()[0].toolCalls[0].value, null, 'no duplicated result may reach Codex');

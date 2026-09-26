@@ -255,28 +255,52 @@ test('a plain https image URL is accepted and forwarded verbatim', async () => {
   });
 });
 
-// SUSPECTED DEFECT: `Image data must be bounded base64` (adapter.mjs:43) is enforced by
-// /^[A-Za-z0-9+\/]*={0,2}$/, which accepts the empty string and has no length-multiple-of-4
-// rule -- so 'A' and '' both pass, and the turn is started with `data:image/png;base64,A`
-// and `data:image/png;base64,`. documents.mjs:37 rejects exactly this shape for PDFs
-// (`encoded.length % 4 !== 0`), so the two payload guards disagree, and this one lets an
-// undecodable image through instead of refusing it.
-test('a base64 image payload that cannot be decoded is refused', { todo: true }, async () => {
+// Was a real defect, now fixed. The length/alphabet test admits strings that decode to
+// nothing, so 'A' and '' both produced a data URL and a thread was started for an image that
+// does not exist. A decode-and-re-encode check now refuses them. Split into separate cases
+// because one loop stops at the first failed assertion and would not reach the empty payload.
+test('a base64 image payload that cannot be decoded is refused', async () => {
   await withAdapter(async adapter => {
-    for (const data of ['A', '']) {
-      await assert.rejects(() => adapter.messages(ask({ messages: [USER([base64Image('image/png', data)])] })), refuses(/Image data must be bounded base64/));
-    }
+    await assert.rejects(() => adapter.messages(ask({ messages: [USER([base64Image('image/png', 'A')])] })), refuses(/not decodable base64/));
   });
 });
 
-// SUSPECTED DEFECT: imageUrl (adapter.mjs:48) only checks https + no credentials, while the
-// hosted-web path (`permitted`, adapter.mjs:368) additionally refuses IP literals and
-// localhost/internal/lan hosts. A caller-supplied https://127.0.0.1:8123/... image URL is
-// forwarded verbatim as the turn input, so whoever dereferences it does so with this
-// machine's network position -- the exact thing the other guard exists to prevent.
-test('an image URL pointing at a private host is refused like a web-retrieval target', { todo: true }, async () => {
+test('an empty base64 image payload is refused', async () => {
   await withAdapter(async adapter => {
-    await assert.rejects(() => adapter.messages(ask({ messages: [USER([urlImage('https://127.0.0.1:8123/secret.png')])] })), refuses(/HTTPS/));
+    await assert.rejects(() => adapter.messages(ask({ messages: [USER([base64Image('image/png', '')])] })), refuses(/not decodable base64/));
+  });
+});
+
+// Non-canonical padding decodes to bytes but re-encodes differently, the same rule
+// documents.mjs applies to PDF sources. Pins that the two payload guards now agree.
+test('a base64 image payload with non-canonical padding is refused', async () => {
+  await withAdapter(async adapter => {
+    await assert.rejects(() => adapter.messages(ask({ messages: [USER([base64Image('image/png', 'iVBORw0KGgo')])] })), refuses(/not decodable base64/));
+  });
+});
+
+// The guard must not reject real images.
+test('a canonical base64 image payload is accepted', async () => {
+  await withAdapter(async adapter => {
+    const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').toString('base64');
+    assert.equal((await adapter.messages(ask({ messages: [USER([base64Image('image/png', png)])] }))).stop_reason, 'end_turn');
+  });
+});
+
+// Claimed as a local SSRF and refuted on review. Neither the adapter nor the Node bridge
+// dereferences an image URL: it is serialised and sent to Codex over stdio, so if anything
+// fetches it, that is the hosted service, where 127.0.0.1 means that service's loopback and
+// not this machine or its daemon on port 8000. The hosted-web private-host rule belongs to a
+// different operation and does not imply a missing guard here. Pinned as intended behaviour;
+// refusing private image URLs would be product policy, not a fix for demonstrated local SSRF.
+test('an image URL is forwarded to Codex rather than dereferenced by the adapter', async () => {
+  await withAdapter(async (adapter, bridges) => {
+    const target = 'https://127.0.0.1:8123/secret.png';
+    assert.equal((await adapter.messages(ask({ messages: [USER([urlImage(target)])] }))).stop_reason, 'end_turn');
+    const sent = JSON.stringify(bridges.flatMap(bridge => bridge.calls));
+    assert.ok(sent.includes(target), 'the URL is passed through as turn input');
+    // Would fail if the adapter ever grew a local fetch: the bytes never enter this process.
+    assert.ok(!sent.includes('PNG'), 'no image bytes were fetched into the request');
   });
 });
 

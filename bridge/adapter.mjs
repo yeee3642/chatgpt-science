@@ -41,6 +41,11 @@ function imageUrl(block) {
   if (source?.type === 'base64') {
     if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(source.media_type)) throw bad('Unsupported image media type.');
     if (typeof source.data !== 'string' || source.data.length > 12 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(source.data)) throw bad('Image data must be bounded base64.');
+    // Length and alphabet alone admit strings that decode to nothing: both "A" and "" pass the
+    // test above. Decode and re-encode so a malformed payload is refused here rather than after
+    // a thread has been started. documents.mjs applies the same rule to PDF sources.
+    const decoded = Buffer.from(source.data, 'base64');
+    if (!decoded.length || decoded.toString('base64') !== source.data) throw bad('Image data is not decodable base64.');
     return `data:${source.media_type};base64,${source.data}`;
   }
   if (source?.type === 'url') {
@@ -482,6 +487,14 @@ export class Adapter {
     if (signal?.aborted) throw aborted();
     const prepared = prepare(body); const selected = await this._model(body.model);
     if (signal?.aborted) throw aborted();
+    // Reject repeats before anything mutates state. The per-record checks below compare each
+    // result against a record that is still unresolved — resolution happens later — so two
+    // entries for one id would both pass, the first resolve the call and the second be lost.
+    const seenResultIds = new Set();
+    for (const result of prepared.lastResults) {
+      if (seenResultIds.has(result.tool_use_id)) throw bad('Each tool_use_id may carry only one tool_result in a request.');
+      seenResultIds.add(result.tool_use_id);
+    }
     const found = [...new Set(prepared.lastResults.map(result => this.toolIndex.get(result.tool_use_id)).filter(Boolean))];
     if (found.length > 1) throw bad('Tool results belong to different active conversations.');
     let context = found[0]; let continuation = Boolean(context);

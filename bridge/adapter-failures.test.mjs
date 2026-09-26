@@ -39,7 +39,13 @@ class FakeBridge extends EventEmitter {
     this.activeTurns = new Map();
   }
 
-  async account() { return this.script.account ?? { account: { type: 'chatgpt' } }; }
+  // The catalog bridge and the generation bridge are distinct connections, and the adapter
+  // checks the account on each. Scripting them separately is what lets a test reach the
+  // generation-time check: a single shared account is refused at the catalog first.
+  async account() {
+    if (this.options.toolHandler && this.script.generationAccount) return this.script.generationAccount;
+    return this.script.account ?? { account: { type: 'chatgpt' } };
+  }
   async models() { return this.script.models ?? [{ model: MODEL, displayName: 'Fake Codex', isDefault: true }]; }
 
   async startThread(params) {
@@ -180,6 +186,49 @@ test('an API-key Codex account is refused with 401 before any thread starts', as
   );
   assert.equal(h.generation().length, 0, 'generation must not begin for a non-ChatGPT account');
   assert.deepEqual(h.bridges[0].startedThreads, [], 'the catalog probe must not open a thread');
+});
+
+// The catalog check at adapter.mjs:295 and the generation check at adapter.mjs:468 are
+// separate guards. Scripting one account for both means the catalog refuses first and the
+// generation guard is never reached — so it could be deleted with every test still passing.
+// Here the catalog accepts a ChatGPT account and only the generation connection is not one.
+test('a non-ChatGPT generation account is refused even when the catalog account is valid', async t => {
+  // The turn is scripted to succeed so that if the guard were removed the request would
+  // complete quickly and this test would fail fast, rather than hanging until the deadline.
+  const h = await harness({
+    account: { account: { type: 'chatgpt' } },
+    generationAccount: { account: { type: 'apiKey' } },
+    'turn/start'(bridge) { bridge.answer('should never be reached'); },
+  });
+  t.after(() => h.dispose());
+
+  // The catalog must genuinely succeed, or this test collapses back into the catalog check.
+  assert.ok((await h.adapter.models()).data.length > 0, 'catalog must be reachable for this to test the generation guard');
+
+  await assert.rejects(
+    () => h.adapter.messages(body()),
+    // The generation guard's wording differs from the catalog's, so matching it proves which
+    // of the two guards fired.
+    adapterError({ status: 401, type: 'authentication_error', message: /required for generation/i }),
+  );
+  assert.deepEqual(h.generation().flatMap(bridge => bridge.startedThreads), [],
+    'no thread may start once the generation account is rejected');
+});
+
+// Inference-only depends on the thread being opened read-only: the real CodexBridge otherwise
+// defaults to a writable workspace. Nothing asserted this, so removing readOnly:true from
+// adapter.mjs:472 left the whole suite green.
+test('the generation thread is opened read-only and ephemeral', async t => {
+  const h = await harness({ 'turn/start'(bridge) { bridge.answer('done'); } });
+  t.after(() => h.dispose());
+  await h.adapter.messages(body());
+
+  const [started] = h.generation().flatMap(bridge => bridge.startedThreads);
+  assert.ok(started, 'a generation thread must have started');
+  assert.equal(started.readOnly, true, 'a writable thread would let the borrowed account touch the filesystem');
+  assert.equal(started.ephemeral, true, 'the thread must not persist beyond this request');
+  assert.match(started.baseInstructions, /inference-only|Do not use native shell/i,
+    'the isolation instructions must be sent with the thread');
 });
 
 test('the 401 also blocks the account and model endpoints', async t => {
