@@ -256,7 +256,18 @@ set and the beta headers.
 Tested: the launcher's isolation guards and the gateway's access controls, 28 tests in
 `bridge/launch.test.mjs` and `bridge/server.test.mjs`.
 
-Not yet done: **no end-to-end launch has been performed.** The translation layer's own test
+Verified by running it: an isolated daemon starts alongside an existing installation without
+disturbing it. `bridge/verify-isolation.mjs` records the running installation's listeners and
+process ids, starts a daemon with a private data directory and a private port, and compares.
+Across repeated runs the isolated daemon took the port assigned to it (24475, 49101 — a fresh
+pair each run), never 8000/8001, ran as its own process, and the existing installation ended
+byte-identical to how it started with all 64 of its processes alive. It is stopped afterwards
+by data directory, and nothing the script did not start is ever signalled.
+
+That retires the largest risk in this approach. What it does NOT cover: signing in, and
+actually producing an answer.
+
+Not yet done: **no message has been answered through the original interface.** The translation layer's own test
 coverage is being written. Until an instance has actually been started and a message has
 actually been answered by ChatGPT through the original interface, treat this as a designed and
 partly verified path, not a working bridge.
