@@ -158,3 +158,7 @@ test('serve mode prints the port the daemon actually reported, not the assigned 
 test('desktop mode prints no browser URL', () => {
   assert.ok(!describe({ mode: 'desktop' }).some(line => line.includes('open the interface')));
 });
+
+// The desktop shell is started by spawning the executable directly, detached, with no
+// windowsHide: CREATE_NO_WINDOW still gives the process a console and the shell refuses to
+// start when one is attached. There is no PowerShell hop and nothing to quote.

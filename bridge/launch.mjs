@@ -29,6 +29,7 @@ const ORIGINAL_EXE = path.join(PROGRAM_DIR, 'claude-science.exe');
 export const FOREIGN_ROOTS = ['.claude-science', '.claude-bioscience', '.operon'].map(leaf => path.join(HOME, leaf));
 
 const fail = message => { throw new Error(message); };
+const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const within = (root, target) => {
   const rel = path.relative(root, target);
   return rel === '' || (!path.isAbsolute(rel) && !rel.startsWith('..' + path.sep) && rel !== '..');
@@ -145,12 +146,18 @@ export async function launch({ instanceRoot, model, exe = ORIGINAL_EXE, args = [
   if (!fs.existsSync(exe)) fail(`Original executable not found at ${exe}. Install or point --exe at it; this launcher never modifies it.`);
 
   const root = resolveInstanceRoot(instanceRoot);
-  await fsp.mkdir(root, { recursive: true });
+  // Desktop mode cannot take --data-dir: the shell only engages with an empty argv, and the
+  // config path is read from argv too. The data root is derived from the home directory, so a
+  // private home is the only way to isolate it without arguments.
+  const isolatedHome = path.join(root, 'home');
+  const dataDir = mode === 'desktop' ? path.join(isolatedHome, '.claude-science') : root;
+  await fsp.mkdir(dataDir, { recursive: true });
 
   const [digest, port] = await Promise.all([sha256(exe), choosePort()]);
   console.log(`[bridge] original executable ${exe}`);
   console.log(`[bridge] sha256 ${digest}`);
   console.log(`[bridge] instance root ${root}`);
+  console.log(`[bridge] data dir ${dataDir}`);
   console.log(`[bridge] isolated daemon port ${port} (previews ${port + 1})`);
 
   // The gateway path segment is the credential: the application sends every request
@@ -185,7 +192,7 @@ export async function launch({ instanceRoot, model, exe = ORIGINAL_EXE, args = [
     fail(`Refusing to launch: ${error.message}`);
   }
 
-  const configFile = await writeConfig(root, port);
+  const configFile = await writeConfig(dataDir, port);
   const baseUrl = `${gateway.origin}/${secret}`;
 
   // ANTHROPIC_BASE_URL is set on this child only. It is never exported to the user's
@@ -200,18 +207,41 @@ export async function launch({ instanceRoot, model, exe = ORIGINAL_EXE, args = [
   // here, so it is opt-in rather than the default.
   const invocation = mode === 'serve'
     ? ['serve', '--no-browser', '--data-dir', root, '--config', configFile, '--port', String(port)]
-    : ['--data-dir', root, '--config', configFile];
-  const child = spawn(exe, [...invocation, ...args], {
-    env,
-    cwd: root,
-    stdio: ['ignore', 'inherit', 'inherit'],
-    windowsHide: false,
-  });
+    : [];
+  if (mode === 'desktop') {
+    if (args.length) fail('Desktop mode takes no extra arguments: the shell only engages when argv is empty.');
+    // Derived from the home directory rather than a flag, for the reason above.
+    env.USERPROFILE = isolatedHome;
+    env.HOME = isolatedHome;
+    // The native sandbox resolves its protected-root table from the profile and refuses to
+    // arm if the AppData roots are missing, which a bare directory does not have. Without
+    // these the app starts and then dies with "Sandbox unavailable".
+    await Promise.all(['AppData/Local', 'AppData/Roaming', 'AppData/LocalLow', 'Documents', 'Desktop']
+      .map(leaf => fsp.mkdir(path.join(isolatedHome, leaf), { recursive: true })));
+    // An Explorer launch has this; a launch from a shell may not, and the shell check
+    // rejects a session without it.
+    env.SESSIONNAME ??= 'Console';
+    // Any of these makes the app read the session as remote and refuse the desktop shell.
+    for (const remote of ['SSH_CONNECTION', 'SSH_TTY', 'SSH_CLIENT']) delete env[remote];
+    // Set by the app on its own re-spawn; present in our environment it would be read as
+    // "already the desktop child" and the shell would never start.
+    delete env.OPERON_WIN_DESKTOP_LAUNCH;
+  }
+  // The shell refuses to start when a console is attached, which is why running the
+  // executable from a terminal prints usage instead. detached + ignored stdio leaves the
+  // child without one. windowsHide must NOT be set: it adds CREATE_NO_WINDOW, which still
+  // gives the process a console and only hides it, so the check fails and the app exits.
+  const child = mode === 'desktop'
+    ? spawn(exe, [], { env, cwd: path.dirname(exe), detached: true, stdio: 'ignore' })
+    : spawn(exe, [...invocation, ...args], {
+        env, cwd: root, stdio: ['ignore', 'inherit', 'inherit'], windowsHide: false,
+      });
+  if (mode === 'desktop') child.unref();
   console.log(`[bridge] launched original application in ${mode} mode, pid ${child.pid}`);
   console.log('[bridge] inference is served by ChatGPT; sign-in still uses your Claude account');
 
-  const lock = await readLock(root);
-  for (const line of describeDaemon({ lock, assignedPort: port, mode, exe, root })) {
+  const lock = await readLock(dataDir);
+  for (const line of describeDaemon({ lock, assignedPort: port, mode, exe, root: dataDir })) {
     (line.startsWith('[bridge] WARNING') ? console.warn : console.log)(line);
   }
 
@@ -223,10 +253,25 @@ export async function launch({ instanceRoot, model, exe = ORIGINAL_EXE, args = [
     // left to exit on its own; no process this launcher did not spawn is ever touched.
     await gateway.close().catch(() => {});
   };
-  child.once('exit', code => { console.log(`[bridge] application exited (${code})`); void shutdown().then(() => process.exit(code ?? 0)); });
+  if (mode === 'desktop') {
+    // The helper returns as soon as it has started the detached shell, so its exit says
+    // nothing about the application. Tying the gateway to it would close the gateway while
+    // the app is still running and leave inference dead. Follow the daemon instead.
+    console.log('[bridge] the application runs detached; leave this window open so inference keeps working (Ctrl-C to stop the gateway)');
+    const watch = setInterval(() => {
+      if (lock?.pid && !alive(lock.pid)) {
+        clearInterval(watch);
+        console.log('[bridge] the isolated daemon exited');
+        void shutdown().then(() => process.exit(0));
+      }
+    }, 3000);
+    watch.unref?.();
+  } else {
+    child.once('exit', code => { console.log(`[bridge] application exited (${code})`); void shutdown().then(() => process.exit(code ?? 0)); });
+  }
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => void shutdown().then(() => process.exit(0)));
 
-  return { child, gateway, root, port, baseUrl, digest };
+  return { child, gateway, root, dataDir, port, baseUrl, digest };
 }
 
 /**
@@ -243,8 +288,9 @@ export async function main(argv = process.argv.slice(2)) {
   --model ID           ChatGPT model to serve (default: the account's default)
   --exe PATH           Original executable (default: the installed one)
   --desktop            Launch the Electron shell instead of serving the interface over
-                       http. Same interface; this invocation is not verified against
-                       the installed build, so serve is the default.
+                       http. Isolated through a private home directory, because the
+                       shell only starts with an empty argv and so cannot take
+                       --data-dir.
 
 Runs alongside an existing installation without touching it: private data directory,
 private port, its own daemon, auto-update disabled. Sign-in still requires your Claude
