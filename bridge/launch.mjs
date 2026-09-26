@@ -116,7 +116,8 @@ async function readLock(root, timeoutMs = 120000) {
   return null;
 }
 
-export async function launch({ instanceRoot, model, exe = ORIGINAL_EXE, args = [] } = {}) {
+export async function launch({ instanceRoot, model, exe = ORIGINAL_EXE, args = [], mode = 'serve' } = {}) {
+  if (!['serve', 'desktop'].includes(mode)) fail(`Unknown mode ${mode}; use serve or desktop.`);
   if (process.platform !== 'win32') fail('This launcher targets the Windows build.');
   if (!fs.existsSync(exe)) fail(`Original executable not found at ${exe}. Install or point --exe at it; this launcher never modifies it.`);
 
@@ -170,19 +171,27 @@ export async function launch({ instanceRoot, model, exe = ORIGINAL_EXE, args = [
   delete env.ANTHROPIC_API_KEY;   // refused by the application, and not ours to forward
   delete env.ANTHROPIC_AUTH_TOKEN;
 
-  const child = spawn(exe, ['--data-dir', root, '--config', configFile, ...args], {
+  // 'serve' runs the daemon and serves the original interface in a browser; it is the mode
+  // verified against this build. 'desktop' is the bare invocation the shortcut uses, which
+  // wraps the same interface in Electron — the same UI, but that invocation is not verified
+  // here, so it is opt-in rather than the default.
+  const invocation = mode === 'serve'
+    ? ['serve', '--no-browser', '--data-dir', root, '--config', configFile, '--port', String(port)]
+    : ['--data-dir', root, '--config', configFile];
+  const child = spawn(exe, [...invocation, ...args], {
     env,
     cwd: root,
     stdio: ['ignore', 'inherit', 'inherit'],
     windowsHide: false,
   });
-  console.log(`[bridge] launched original application, pid ${child.pid}`);
+  console.log(`[bridge] launched original application in ${mode} mode, pid ${child.pid}`);
   console.log('[bridge] inference is served by ChatGPT; sign-in still uses your Claude account');
 
   const lock = await readLock(root);
   if (lock) {
     console.log(`[bridge] daemon reports version ${lock.version} on port ${lock.port} (pid ${lock.pid})`);
     if (lock.port === port) console.log('[bridge] verified: the isolated daemon took the port assigned to it');
+    if (mode === 'serve') console.log(`[bridge] open the interface at http://127.0.0.1:${lock.port}  (run: "${path.basename(exe)}" url --data-dir "${root}" for a sign-in link)`);
     else console.warn(`[bridge] WARNING: daemon is on port ${lock.port}, not the assigned ${port}. Verify it is not sharing another instance's port.`);
   } else {
     console.warn('[bridge] WARNING: no lockfile appeared; could not verify the daemon port.');
@@ -215,12 +224,20 @@ export async function main(argv = process.argv.slice(2)) {
   --instance-root DIR  Private data directory (default: %LOCALAPPDATA%\\ChatGPTScienceBridge\\instance)
   --model ID           ChatGPT model to serve (default: the account's default)
   --exe PATH           Original executable (default: the installed one)
+  --desktop            Launch the Electron shell instead of serving the interface over
+                       http. Same interface; this invocation is not verified against
+                       the installed build, so serve is the default.
 
 Runs alongside an existing installation without touching it: private data directory,
 private port, its own daemon, auto-update disabled. Sign-in still requires your Claude
 account; only inference is served by ChatGPT.`);
     return 0;
   }
-  await launch({ instanceRoot: option('--instance-root'), model: option('--model'), exe: option('--exe') });
+  await launch({
+    instanceRoot: option('--instance-root'),
+    model: option('--model'),
+    exe: option('--exe'),
+    mode: argv.includes('--desktop') ? 'desktop' : 'serve',
+  });
   return 0;
 }
