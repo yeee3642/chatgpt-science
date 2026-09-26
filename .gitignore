@@ -48,3 +48,7 @@ work/
 *.zip
 *.7z
 *.asar
+dist-launcher/
+
+# bun --compile leaves a scratch executable beside the entry point.
+*.bun-build

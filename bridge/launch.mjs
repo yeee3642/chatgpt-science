@@ -116,6 +116,29 @@ async function readLock(root, timeoutMs = 120000) {
   return null;
 }
 
+/**
+ * The lines to report about the daemon that came up, and whether it is the one we asked for.
+ *
+ * Separated from launch() and covered by tests because the port check is a safety signal: an
+ * earlier edit inserted a mode check between the port comparison and its else branch, which
+ * silently bound the mismatch warning to the mode and stopped it ever firing in serve mode.
+ */
+export function describeDaemon({ lock, assignedPort, mode, exe, root }) {
+  if (!lock) return ['[bridge] WARNING: no lockfile appeared; could not verify the daemon port.'];
+  const lines = [`[bridge] daemon reports version ${lock.version} on port ${lock.port} (pid ${lock.pid})`];
+  if (lock.port === assignedPort) {
+    lines.push('[bridge] verified: the isolated daemon took the port assigned to it');
+  } else {
+    // Usually means a daemon was already serving this data directory, so the port this launch
+    // reserved was ignored. Harmless if that daemon is ours, but it has to be said out loud:
+    // the alternative reading is that this instance is not as separate as intended.
+    lines.push(`[bridge] WARNING: daemon is on port ${lock.port}, not the assigned ${assignedPort}.`);
+    lines.push(`[bridge] WARNING: a daemon was probably already running for this data directory. Confirm pid ${lock.pid} is yours, or stop it with: "${exe}" stop --data-dir "${root}"`);
+  }
+  if (mode === 'serve') lines.push(`[bridge] open the interface at http://127.0.0.1:${lock.port}  (run: "${path.basename(exe)}" url --data-dir "${root}" for a sign-in link)`);
+  return lines;
+}
+
 export async function launch({ instanceRoot, model, exe = ORIGINAL_EXE, args = [], mode = 'serve' } = {}) {
   if (!['serve', 'desktop'].includes(mode)) fail(`Unknown mode ${mode}; use serve or desktop.`);
   if (process.platform !== 'win32') fail('This launcher targets the Windows build.');
@@ -188,13 +211,8 @@ export async function launch({ instanceRoot, model, exe = ORIGINAL_EXE, args = [
   console.log('[bridge] inference is served by ChatGPT; sign-in still uses your Claude account');
 
   const lock = await readLock(root);
-  if (lock) {
-    console.log(`[bridge] daemon reports version ${lock.version} on port ${lock.port} (pid ${lock.pid})`);
-    if (lock.port === port) console.log('[bridge] verified: the isolated daemon took the port assigned to it');
-    if (mode === 'serve') console.log(`[bridge] open the interface at http://127.0.0.1:${lock.port}  (run: "${path.basename(exe)}" url --data-dir "${root}" for a sign-in link)`);
-    else console.warn(`[bridge] WARNING: daemon is on port ${lock.port}, not the assigned ${port}. Verify it is not sharing another instance's port.`);
-  } else {
-    console.warn('[bridge] WARNING: no lockfile appeared; could not verify the daemon port.');
+  for (const line of describeDaemon({ lock, assignedPort: port, mode, exe, root })) {
+    (line.startsWith('[bridge] WARNING') ? console.warn : console.log)(line);
   }
 
   let closing = false;

@@ -220,12 +220,14 @@ Only the launcher is packaged. The application itself is already an executable a
 rebuilt, rewrapped or redistributed — the launcher starts the installed one.
 
 ```bash
-cd bridge && npm run build:exe        # bun build --compile -> dist/ChatGPTScienceLauncher.exe
+cd bridge && npm run build:exe   # bun build --compile -> dist-launcher/ChatGPTScienceLauncher.exe
 ```
 
 The result is a single ~98 MB file; the size is bun's embedded runtime, and it means the
-launcher runs on a machine with no Node installed. `dist/` and `*.exe` are gitignored, so the
-binary is built rather than committed.
+launcher runs on a machine with no Node installed. It goes to `dist-launcher/`, not `dist/`,
+because `dist/` is the standalone application's vite output and vite clears it on build — an
+executable left there is both deleted and, while running, blocks the build with EPERM.
+`dist-launcher/` and `*.exe` are gitignored, so the binary is built rather than committed.
 
 Both `launch.mjs` and `server.mjs` previously decided whether to run by comparing
 `import.meta.url` against `process.argv[1]`. Bundled into one executable every module reports

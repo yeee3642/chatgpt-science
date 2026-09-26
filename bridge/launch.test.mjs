@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import net from 'node:net';
-import { resolveInstanceRoot, portFree, choosePort, writeConfig, PROGRAM_DIR, FOREIGN_ROOTS } from './launch.mjs';
+import { resolveInstanceRoot, portFree, choosePort, writeConfig, describeDaemon, PROGRAM_DIR, FOREIGN_ROOTS } from './launch.mjs';
 
 const HOME = os.homedir();
 
@@ -111,4 +111,50 @@ test('the generated config names no foreign data directory', async () => {
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+// --- daemon reporting -------------------------------------------------------------------
+// The port check is a safety signal. It regressed once: a mode check inserted between the
+// port comparison and its else branch bound the warning to the mode, so a real mismatch
+// (daemon on 2220, assigned 46005) printed nothing. These pin each branch independently.
+const LOCK = { version: '0.1.53', port: 46005, pid: 999, sandbox_port: 46006 };
+const describe = extra => describeDaemon({ lock: LOCK, assignedPort: 46005, mode: 'serve', exe: 'C:/tools/claude-science.exe', root: 'C:/instance-root', ...extra });
+const warnings = lines => lines.filter(line => line.startsWith('[bridge] WARNING'));
+
+test('a matching port is reported as verified and warns about nothing', () => {
+  const lines = describe();
+  assert.ok(lines.some(line => line.includes('verified')));
+  assert.deepEqual(warnings(lines), []);
+});
+
+test('a mismatched port warns, in serve mode too', () => {
+  const lines = describe({ lock: { ...LOCK, port: 2220 } });
+  assert.ok(warnings(lines).length >= 1, 'a port the launcher did not assign must warn');
+  assert.ok(lines.some(line => line.includes('2220') && line.includes('46005')), 'both ports must be named');
+  assert.ok(!lines.some(line => line.includes('verified')), 'a mismatch must not also claim verification');
+});
+
+test('a mismatched port warns in desktop mode as well', () => {
+  assert.ok(warnings(describe({ lock: { ...LOCK, port: 2220 }, mode: 'desktop' })).length >= 1);
+});
+
+test('a mismatch tells the user how to stop the daemon that took the port', () => {
+  const lines = describe({ lock: { ...LOCK, port: 2220 } });
+  assert.ok(lines.some(line => line.includes('stop --data-dir')), 'the warning must be actionable');
+});
+
+test('a missing lockfile warns rather than reporting success', () => {
+  const lines = describeDaemon({ lock: null, assignedPort: 46005, mode: 'serve', exe: 'x', root: 'r' });
+  assert.equal(warnings(lines).length, 1);
+  assert.ok(!lines.some(line => line.includes('open the interface')), 'no URL when the daemon is unconfirmed');
+});
+
+test('serve mode prints the port the daemon actually reported, not the assigned one', () => {
+  const lines = describe({ lock: { ...LOCK, port: 2220 } });
+  assert.ok(lines.some(line => line.includes('http://127.0.0.1:2220')), 'the URL must use the real port');
+  assert.ok(!lines.some(line => line.includes('http://127.0.0.1:46005')));
+});
+
+test('desktop mode prints no browser URL', () => {
+  assert.ok(!describe({ mode: 'desktop' }).some(line => line.includes('open the interface')));
 });

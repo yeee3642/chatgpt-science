@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test *.test.mjs",
-    "build:exe": "bun build --compile --target=bun-windows-x64 launcher-entry.mjs --outfile ../dist/ChatGPTScienceLauncher.exe",
+    "build:exe": "bun build --compile --target=bun-windows-x64 launcher-entry.mjs --outfile ../dist-launcher/ChatGPTScienceLauncher.exe",
     "smoke": "node smoke-chatgpt.mjs"
   },
   "dependencies": {
