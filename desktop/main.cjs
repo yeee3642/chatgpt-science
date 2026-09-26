@@ -18,9 +18,13 @@ app.whenReady().then(async () => {
   const runtimeRoot=app.isPackaged?path.join(process.resourcesPath,'runtime'):path.join(app.getAppPath(),'.runtime');
   process.env.SCIENCE_RUNTIME_DIR=runtimeRoot;
   process.env.SCIENCE_WORKER_DIR=app.isPackaged?path.join(process.resourcesPath,'app.asar.unpacked','worker'):path.join(app.getAppPath(),'worker');
+  // The reference interface is an external asset that must be supplied locally and is not
+  // part of this application. Opt in with SCIENCE_REFERENCE_UI=1; otherwise this app serves
+  // its own interface, which is what keeps it independent of any other vendor's build.
+  const useReferenceUi = process.env.SCIENCE_REFERENCE_UI === '1';
   const { startServer } = await import('../server/index.mjs');
   const {defaultPythonPath}=await import('../server/kernel-client.mjs');
-  service = await startServer({ dataRoot: path.join(dataHome, 'research-data'), referenceUi:true, pythonPath: process.env.SCIENCE_PYTHON_PATH || defaultPythonPath(runtimeRoot) });
+  service = await startServer({ dataRoot: path.join(dataHome, 'research-data'), referenceUi:useReferenceUi, pythonPath: process.env.SCIENCE_PYTHON_PATH || defaultPythonPath(runtimeRoot) });
   fs.writeFileSync(path.join(dataHome,'running.json'),JSON.stringify({app:'ChatGPT Science',pid:process.pid,origin:service.origin,startedAt:new Date().toISOString()},null,2));
   await session.defaultSession.cookies.set({url:service.origin,name:'science_session',value:service.token,httpOnly:true,sameSite:'strict',path:'/'});
   session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => callback(permission === 'notifications'));
@@ -28,7 +32,7 @@ app.whenReady().then(async () => {
   window.webContents.on('page-title-updated',event=>{event.preventDefault();window.setTitle('ChatGPT Science');});
   window.webContents.setWindowOpenHandler(({url}) => { if (/^https:\/\//.test(url)) void shell.openExternal(url); return {action:'deny'}; });
   window.webContents.on('will-navigate', (event,url) => { if (!url.startsWith(service.origin+'/')) {event.preventDefault();if(/^https:\/\//.test(url))void shell.openExternal(url);} });
-  await window.loadURL(service.origin+'/reference/');
+  await window.loadURL(service.origin + (useReferenceUi ? '/reference/' : '/'));
   window.show();
 }).catch(error=>{dialog.showErrorBox('ChatGPT Science 啟動失敗',error.message);app.quit();});
 app.on('window-all-closed',()=>app.quit());

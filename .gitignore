@@ -48,3 +48,4 @@ work/
 *.zip
 *.7z
 *.asar
+electron-builder.no-runtime.json
