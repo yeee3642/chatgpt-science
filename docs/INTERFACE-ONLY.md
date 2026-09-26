@@ -185,6 +185,35 @@ IDs, provider-managed containers, and MCP execution on the provider side. Token 
 output ceilings are estimates, so the application's usage and cost panels do not describe real
 ChatGPT billing.
 
+## The ChatGPT side, as observed
+
+`bridge/smoke-chatgpt.mjs` asks for capabilities only and generates nothing. Run against this
+machine's managed ChatGPT sign-in it reported ready, with eight models offered:
+
+```
+gpt-6-astra   gpt-6-sol   gpt-6-luna
+gpt-5.6-sol   gpt-5.6-terra   gpt-5.6-luna
+gpt-daybreak-blue-latest   gpt-5.5
+```
+
+The Codex client requires the native `codex.exe`, not the npm shim. It searches
+`node_modules/@openai/codex/node_modules/@openai/codex-win32-<arch>/vendor/<triple>/bin/codex.exe`
+and honours `SCIENCE_CODEX_PATH`. API-key mode is refused on this side too, so ChatGPT access is
+a managed sign-in or nothing.
+
+### Known defect: intermittent crash on shutdown
+
+Closing the gateway sometimes aborts the process with a libuv assertion:
+
+```
+Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76
+```
+
+It reproduced once in two identical runs, so it is a race in the close path rather than a
+deterministic failure — most likely a handle closed twice while the Codex child is going away.
+It happens during teardown, after useful work, and the launcher's shutdown only closes the
+gateway it started. It is still a real defect and is not fixed.
+
 ## State of this work
 
 Established by reading the build and confirmed on this machine: the redirect point, the
