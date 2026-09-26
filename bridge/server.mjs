@@ -50,7 +50,10 @@ export async function startGateway({port=0,secret,adapter,dataRoot,maxBodyBytes=
   origin=`http://127.0.0.1:${server.address().port}`;
   return{origin,server,startup,async close(){await engine.close();server.closeAllConnections?.();await new Promise(resolve=>server.close(resolve));}};
 }
-if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+// Standalone-gateway mode. Also requires the token this mode needs, so that bundling these
+// modules into one executable — where every module's path equals the executable's — does not
+// make this block fire instead of the real entry point.
+if(process.env.SCIENCE_BRIDGE_TOKEN&&process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const service=await startGateway({port:Number(process.env.SCIENCE_BRIDGE_PORT||0),secret:process.env.SCIENCE_BRIDGE_TOKEN,dataRoot:process.env.SCIENCE_BRIDGE_DATA});
   console.log(JSON.stringify({type:'codex-science-listening',origin:service.origin,pid:process.pid}));
   process.once('SIGTERM',()=>void service.close().finally(()=>process.exit(0)));process.once('SIGINT',()=>void service.close().finally(()=>process.exit(0)));

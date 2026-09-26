@@ -6,7 +6,9 @@
   "description": "Loopback Anthropic-Messages gateway that redirects Claude Science inference to a ChatGPT account",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test *.test.mjs"
+    "test": "node --test *.test.mjs",
+    "build:exe": "bun build --compile --target=bun-windows-x64 launcher-entry.mjs --outfile ../dist/ChatGPTScienceLauncher.exe",
+    "smoke": "node smoke-chatgpt.mjs"
   },
   "dependencies": {
     "pdf-parse": "2.4.5"

@@ -202,10 +202,14 @@ export async function launch({ instanceRoot, model, exe = ORIGINAL_EXE, args = [
   return { child, gateway, root, port, baseUrl, digest };
 }
 
-if (import.meta.url === `file:///${process.argv[1]?.replaceAll('\\', '/')}`) {
-  const argv = process.argv.slice(2);
+/**
+ * Command-line entry. Exported rather than run on import-detection, because when these
+ * modules are bundled into a single executable every module sees the same path and more
+ * than one "am I the entry point?" check would fire.
+ */
+export async function main(argv = process.argv.slice(2)) {
   const option = name => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
-  if (argv.includes('--help')) {
+  if (argv.includes('--help') || argv.includes('-h')) {
     console.log(`Launch an isolated Claude Science instance with ChatGPT inference.
 
   --instance-root DIR  Private data directory (default: %LOCALAPPDATA%\\ChatGPTScienceBridge\\instance)
@@ -215,7 +219,8 @@ if (import.meta.url === `file:///${process.argv[1]?.replaceAll('\\', '/')}`) {
 Runs alongside an existing installation without touching it: private data directory,
 private port, its own daemon, auto-update disabled. Sign-in still requires your Claude
 account; only inference is served by ChatGPT.`);
-    process.exit(0);
+    return 0;
   }
   await launch({ instanceRoot: option('--instance-root'), model: option('--model'), exe: option('--exe') });
+  return 0;
 }

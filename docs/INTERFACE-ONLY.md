@@ -214,6 +214,38 @@ deterministic failure — most likely a handle closed twice while the Codex chil
 It happens during teardown, after useful work, and the launcher's shutdown only closes the
 gateway it started. It is still a real defect and is not fixed.
 
+## Packaging
+
+Only the launcher is packaged. The application itself is already an executable and is not
+rebuilt, rewrapped or redistributed — the launcher starts the installed one.
+
+```bash
+cd bridge && npm run build:exe        # bun build --compile -> dist/ChatGPTScienceLauncher.exe
+```
+
+The result is a single ~98 MB file; the size is bun's embedded runtime, and it means the
+launcher runs on a machine with no Node installed. `dist/` and `*.exe` are gitignored, so the
+binary is built rather than committed.
+
+Both `launch.mjs` and `server.mjs` previously decided whether to run by comparing
+`import.meta.url` against `process.argv[1]`. Bundled into one executable every module reports
+the executable's own path, so both fired and the gateway's standalone mode won. The entry is
+now explicit (`launcher-entry.mjs`), and standalone gateway mode additionally requires the
+`SCIENCE_BRIDGE_TOKEN` it cannot work without.
+
+### The packaged build cannot open PDFs
+
+`documents.mjs` locates pdf.js at runtime with
+`createRequire(import.meta.url).resolve('pdfjs-dist/package.json')`. Inside a compiled bundle
+that resolves against the virtual bundle root, not a real directory, so the lookup fails. The
+failure is clean — a 503 saying local PDF support is unavailable — but a PDF attachment will
+not work in the packaged launcher. Running `node launch.mjs` from `bridge/` with
+`npm install` done does support PDFs.
+
+Fixing this means resolving the dependency relative to `process.execPath` when bundled and
+shipping `node_modules` beside the executable, which turns the single file into a folder. That
+is not done.
+
 ## State of this work
 
 Established by reading the build and confirmed on this machine: the redirect point, the
