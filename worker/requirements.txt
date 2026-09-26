@@ -1,0 +1,8 @@
+jupyter_client>=8.6,<9
+ipykernel>=6.29,<8
+matplotlib>=3.9,<4
+pandas>=2.2,<4
+numpy>=2,<3
+psutil>=6,<8
+pyarrow>=17,<26
+openpyxl>=3.1,<4

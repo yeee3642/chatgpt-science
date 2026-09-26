@@ -1,0 +1,93 @@
+{
+  "name": "chatgpt-science-workbench",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "description": "Independent ChatGPT Science desktop research application",
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "build": "vite build",
+    "start": "node server/index.mjs",
+    "desktop": "electron .",
+    "test": "node --test tests/*.test.mjs",
+    "prepare:reference": "node scripts/prepare-reference-ui.mjs",
+    "package:win": "npm run prepare:reference && electron-builder --win portable --publish never"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1136.0",
+    "@azure/storage-blob": "^12.33.0",
+    "@google-cloud/storage": "^8.2.0",
+    "@modelcontextprotocol/sdk": "^1.27.0",
+    "@phosphor-icons/react": "^2.1.10",
+    "3dmol": "^2.5.3",
+    "dompurify": "^3.3.1",
+    "express": "^5.2.1",
+    "katex": "^0.16.22",
+    "marked": "^17.0.1",
+    "multer": "^2.0.2",
+    "papaparse": "^5.5.3",
+    "pdf-parse": "2.4.5",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@babel/parser": "7.29.9",
+    "@vitejs/plugin-react": "^5.1.4",
+    "electron": "^41.0.0",
+    "electron-builder": "^26.8.1",
+    "vite": "^7.3.1"
+  },
+  "build": {
+    "appId": "local.chatgpt.science.independent",
+    "productName": "ChatGPT Science",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "reference-ui/**/*",
+      "server/**/*",
+      "worker/**/*",
+      "desktop/**/*",
+      "package.json",
+      "README.md"
+    ],
+    "asarUnpack": [
+      "worker/**/*"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "ChatGPT-Science-0.1.1-Windows.exe"
+    },
+    "extraResources": [
+      {
+        "from": ".runtime/python/cpython-3.12.13-windows-x86_64-none",
+        "to": "runtime/python/cpython-3.12.13-windows-x86_64-none",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
+      },
+      {
+        "from": ".runtime/R",
+        "to": "runtime/R"
+      },
+      {
+        "from": "worker",
+        "to": "runtime/worker",
+        "filter": [
+          "**/*.py",
+          "**/*.R",
+          "RUNTIME.md"
+        ]
+      }
+    ]
+  }
+}
